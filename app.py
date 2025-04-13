@@ -6,71 +6,68 @@ from sklearn.metrics.pairwise import cosine_similarity
 from sklearn.decomposition import TruncatedSVD
 from sklearn.preprocessing import MinMaxScaler
 from sklearn.linear_model import LogisticRegression
-from sklearn.model_selection import train_test_split, cross_val_score, StratifiedKFold
+from sklearn.model_selection import train_test_split, StratifiedKFold, cross_val_score
 from sklearn.metrics import mean_squared_error, accuracy_score, precision_score, recall_score, f1_score, confusion_matrix
 
-# ✅ SET PAGE CONFIG AT THE VERY TOP
+# ---------------------- Page Config ----------------------
 st.set_page_config(page_title="🎬 Movie Recommender", layout="centered")
 
-# -------------------------- Data Loading --------------------------
+# ---------------------- Load Data ----------------------
 @st.cache_data
 def load_data():
     movies = pd.read_csv("movies.csv", encoding='latin-1')
     ratings = pd.read_csv("ratings.csv", encoding='latin-1')
-    tags = pd.read_csv("tags.csv", encoding='latin-1')  # optional, depends on your dataset
+    tags = pd.read_csv("tags.csv", encoding='latin-1', on_bad_lines='skip')
     return movies, ratings, tags
 
-# -------------------------- Preprocessing --------------------------
+# ---------------------- Preprocessing ----------------------
 def preprocess_data(movies, ratings):
-    ratings = ratings.merge(movies, on='movieId', how='left')
+    merged = ratings.merge(movies, on='movieId', how='left')
     
-    # Remove outliers
-    Q1 = ratings['rating'].quantile(0.25)
-    Q3 = ratings['rating'].quantile(0.75)
+    # Remove rating outliers
+    Q1 = merged['rating'].quantile(0.25)
+    Q3 = merged['rating'].quantile(0.75)
     IQR = Q3 - Q1
-    ratings = ratings[(ratings['rating'] >= Q1 - 1.5*IQR) & (ratings['rating'] <= Q3 + 1.5*IQR)]
+    filtered = merged[(merged['rating'] >= Q1 - 1.5*IQR) & (merged['rating'] <= Q3 + 1.5*IQR)]
 
-    # User-Movie Matrix
-    user_movie_matrix = ratings.pivot(index='userId', columns='movieId', values='rating').fillna(0)
-    scaler = MinMaxScaler()
-    user_movie_matrix_scaled = scaler.fit_transform(user_movie_matrix)
+    # Create user-movie matrix
+    matrix = filtered.pivot(index='userId', columns='movieId', values='rating').fillna(0)
+    scaled_matrix = MinMaxScaler().fit_transform(matrix)
 
-    return ratings, user_movie_matrix, user_movie_matrix_scaled
+    return filtered, matrix, scaled_matrix
 
-# -------------------------- Collaborative Filtering (SVD) --------------------------
-def svd_decomposition(user_movie_matrix_scaled):
+# ---------------------- SVD ----------------------
+def perform_svd(scaled_matrix):
     svd = TruncatedSVD(n_components=10)
-    svd_matrix = svd.fit_transform(user_movie_matrix_scaled)
+    svd_matrix = svd.fit_transform(scaled_matrix)
     reconstructed = np.dot(svd_matrix, svd.components_)
-    rmse_svd = np.sqrt(mean_squared_error(user_movie_matrix_scaled, reconstructed))
-    return rmse_svd, svd_matrix, reconstructed
+    rmse = np.sqrt(mean_squared_error(scaled_matrix, reconstructed))
+    return svd_matrix, reconstructed, rmse
 
-# -------------------------- Content-Based Filtering --------------------------
-def content_based_recommend(title, cosine_sim, movies_df):
-    indices = pd.Series(movies_df.index, index=movies_df['title']).drop_duplicates()
+# ---------------------- Content-Based ----------------------
+def content_based_recommend(title, movies, cosine_sim):
+    indices = pd.Series(movies.index, index=movies['title']).drop_duplicates()
     if title not in indices:
         return ["Movie not found."]
     idx = indices[title]
     sim_scores = list(enumerate(cosine_sim[idx]))
     sim_scores = sorted(sim_scores, key=lambda x: x[1], reverse=True)[1:6]
     movie_indices = [i[0] for i in sim_scores]
-    return movies_df['title'].iloc[movie_indices].tolist()
+    return movies['title'].iloc[movie_indices].tolist()
 
-# -------------------------- Hybrid Filtering --------------------------
-def hybrid_filtering(reconstructed, genre_sim, user_movie_matrix_scaled):
-    # NOTE: Shape mismatch is possible; we handle it by trimming
+# ---------------------- Hybrid Filtering ----------------------
+def hybrid_filter(reconstructed, genre_sim, original_matrix):
     min_rows = min(reconstructed.shape[0], genre_sim.shape[0])
     min_cols = min(reconstructed.shape[1], genre_sim.shape[1])
-    hybrid_matrix = 0.6 * reconstructed[:min_rows, :min_cols] + 0.4 * genre_sim[:min_rows, :min_cols]
-    rmse_hybrid = np.sqrt(mean_squared_error(user_movie_matrix_scaled[:min_rows, :min_cols], hybrid_matrix))
-    return rmse_hybrid, hybrid_matrix
+    hybrid = 0.6 * reconstructed[:min_rows, :min_cols] + 0.4 * genre_sim[:min_rows, :min_cols]
+    rmse = np.sqrt(mean_squared_error(original_matrix[:min_rows, :min_cols], hybrid))
+    return hybrid, rmse
 
-# -------------------------- Classification --------------------------
-def classification_model(svd_matrix, ratings):
-    movie_data = ratings.copy()
-    movie_data['label'] = (movie_data['rating'] >= 3.5).astype(int)
+# ---------------------- Classification ----------------------
+def classify_users(svd_matrix, filtered_ratings):
+    filtered_ratings['label'] = (filtered_ratings['rating'] >= 3.5).astype(int)
     X = svd_matrix
-    y = movie_data['label'].values[:X.shape[0]]
+    y = filtered_ratings['label'].values[:X.shape[0]]
     X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, stratify=y, random_state=42)
 
     clf = LogisticRegression(max_iter=1000)
@@ -80,54 +77,49 @@ def classification_model(svd_matrix, ratings):
     cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
     cv_scores = cross_val_score(clf, X, y, cv=cv, scoring='accuracy')
 
-    return clf, y_test, y_pred, cv_scores
+    return y_test, y_pred, cv_scores
 
-# -------------------------- Streamlit UI --------------------------
+# ---------------------- UI ----------------------
 st.title("🎥 Movie Recommendation System")
 
 menu = ["Content-Based", "Collaborative Filtering", "Hybrid", "Model Evaluation"]
 choice = st.sidebar.selectbox("Choose Recommendation Type", menu)
 
-# Load the datasets first
+# Load and preprocess
 movies, ratings, tags = load_data()
+filtered_ratings, matrix, scaled_matrix = preprocess_data(movies, ratings)
+svd_matrix, reconstructed, svd_rmse = perform_svd(scaled_matrix)
 
-# Now pass them to the preprocessing function
-ratings, user_movie_matrix, user_movie_matrix_scaled = preprocess_data(movies, ratings)
-
-# Perform SVD and Content-Based Calculations
-rmse_svd, svd_matrix, reconstructed = svd_decomposition(user_movie_matrix_scaled)
-
-# Content-Based Filtering
+# Content-Based
 movies['genres'] = movies['genres'].fillna('')
 vectorizer = TfidfVectorizer(stop_words='english')
 tfidf_matrix = vectorizer.fit_transform(movies['genres'])
-genre_sim = cosine_similarity(tfidf_matrix)
+cosine_sim = cosine_similarity(tfidf_matrix)
 
-# Hybrid Filtering
-rmse_hybrid, hybrid_matrix = hybrid_filtering(reconstructed, genre_sim, user_movie_matrix_scaled)
+# Hybrid
+hybrid_matrix, hybrid_rmse = hybrid_filter(reconstructed, cosine_sim, scaled_matrix)
 
-# Model Classification
-clf, y_test, y_pred, cv_scores = classification_model(svd_matrix, ratings)
+# Classification
+y_test, y_pred, cv_scores = classify_users(svd_matrix, filtered_ratings)
 
+# ---------------------- Streamlit Sections ----------------------
 if choice == "Content-Based":
     st.subheader("🔍 Content-Based Recommendation")
-    movie_list = movies['title'].dropna().unique().tolist()
-    selected_movie = st.selectbox("Choose a movie", movie_list)
+    movie_titles = movies['title'].dropna().unique()
+    selected_movie = st.selectbox("Choose a movie", sorted(movie_titles))
 
     if st.button("Recommend"):
-        recommendations = content_based_recommend(selected_movie, genre_sim, movies)
-        st.write("Top 5 Recommended Movies:")
+        recommendations = content_based_recommend(selected_movie, movies, cosine_sim)
+        st.write("Top 5 similar movies:")
         st.table(recommendations)
 
 elif choice == "Collaborative Filtering":
     st.subheader("👥 Collaborative Filtering (SVD)")
-    st.write(f"RMSE from SVD Model: {rmse_svd:.4f}")
-    st.info("Collaborative predictions can be added here with user input.")
+    st.write(f"RMSE of SVD Model: `{svd_rmse:.4f}`")
 
 elif choice == "Hybrid":
     st.subheader("🔗 Hybrid Recommendation")
-    st.write(f"RMSE from Hybrid Model: {rmse_hybrid:.4f}")
-    st.info("This combines collaborative and content-based methods. Personalization can be added.")
+    st.write(f"RMSE of Hybrid Model: `{hybrid_rmse:.4f}`")
 
 elif choice == "Model Evaluation":
     st.subheader("📊 Logistic Regression Evaluation")
