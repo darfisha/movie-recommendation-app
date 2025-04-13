@@ -12,23 +12,6 @@ from sklearn.metrics import mean_squared_error, accuracy_score, precision_score,
 # ✅ SET PAGE CONFIG AT THE VERY TOP
 st.set_page_config(page_title="🎬 Movie Recommender", layout="centered")
 
-# -------------------------- Data Loading --------------------------
-@st.cache_data
-def load_data():
-    movies = pd.read_csv("movies.csv", encoding='latin-1')
-    ratings = pd.read_csv("ratings.csv", encoding='latin-1')
-    tags = pd.read_csv("tags.csv", encoding='latin-1')
-    return movies, ratings, tags
-
-# Load the datasets first
-movies = pd.read_csv("movies.csv", encoding='latin-1')
-ratings = pd.read_csv("ratings.csv", encoding='latin-1')
-tags = pd.read_csv("tags.csv", encoding='latin-1')  # optional, depending on use
-
-# Now pass them to the preprocessing function
-ratings, user_movie_matrix, user_movie_matrix_scaled = preprocess_data(movies, ratings)
-
-
 # -------------------------- Preprocessing --------------------------
 def preprocess_data(movies, ratings):
     ratings = ratings.merge(movies, on='movieId', how='left')
@@ -46,7 +29,20 @@ def preprocess_data(movies, ratings):
 
     return ratings, user_movie_matrix, user_movie_matrix_scaled
 
+# -------------------------- Data Loading --------------------------
+@st.cache_data
+def load_data():
+    movies = pd.read_csv("movies.csv", encoding='latin-1')
+    ratings = pd.read_csv("ratings.csv", encoding='latin-1')
+    tags = pd.read_csv("tags.csv", encoding='latin-1')
+    return movies, ratings, tags
+
+# Load the datasets first
+movies, ratings, tags = load_data()
+
+# Now pass them to the preprocessing function
 ratings, user_movie_matrix, user_movie_matrix_scaled = preprocess_data(movies, ratings)
+
 
 # -------------------------- Collaborative Filtering (SVD) --------------------------
 svd = TruncatedSVD(n_components=10)
