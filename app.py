@@ -12,6 +12,14 @@ from sklearn.metrics import mean_squared_error, accuracy_score, precision_score,
 # ✅ SET PAGE CONFIG AT THE VERY TOP
 st.set_page_config(page_title="🎬 Movie Recommender", layout="centered")
 
+# -------------------------- Data Loading --------------------------
+@st.cache_data
+def load_data():
+    movies = pd.read_csv("movies.csv", encoding='latin-1')
+    ratings = pd.read_csv("ratings.csv", encoding='latin-1')
+    tags = pd.read_csv("tags.csv", encoding='latin-1')
+    return movies, ratings, tags
+
 # -------------------------- Preprocessing --------------------------
 def preprocess_data(movies, ratings):
     ratings = ratings.merge(movies, on='movieId', how='left')
@@ -29,33 +37,15 @@ def preprocess_data(movies, ratings):
 
     return ratings, user_movie_matrix, user_movie_matrix_scaled
 
-# -------------------------- Data Loading --------------------------
-@st.cache_data
-def load_data():
-    movies = pd.read_csv("movies.csv", encoding='latin-1')
-    ratings = pd.read_csv("ratings.csv", encoding='latin-1')
-    tags = pd.read_csv("tags.csv", encoding='latin-1')
-    return movies, ratings, tags
-
-# Load the datasets first
-movies, ratings, tags = load_data()
-
-# Now pass them to the preprocessing function
-ratings, user_movie_matrix, user_movie_matrix_scaled = preprocess_data(movies, ratings)
-
-
 # -------------------------- Collaborative Filtering (SVD) --------------------------
-svd = TruncatedSVD(n_components=10)
-svd_matrix = svd.fit_transform(user_movie_matrix_scaled)
-reconstructed = np.dot(svd_matrix, svd.components_)
-rmse_svd = np.sqrt(mean_squared_error(user_movie_matrix_scaled, reconstructed))
+def svd_decomposition(user_movie_matrix_scaled):
+    svd = TruncatedSVD(n_components=10)
+    svd_matrix = svd.fit_transform(user_movie_matrix_scaled)
+    reconstructed = np.dot(svd_matrix, svd.components_)
+    rmse_svd = np.sqrt(mean_squared_error(user_movie_matrix_scaled, reconstructed))
+    return rmse_svd, svd_matrix, reconstructed
 
 # -------------------------- Content-Based Filtering --------------------------
-movies['genres'] = movies['genres'].fillna('')
-vectorizer = TfidfVectorizer(stop_words='english')
-tfidf_matrix = vectorizer.fit_transform(movies['genres'])
-genre_sim = cosine_similarity(tfidf_matrix)
-
 def content_based_recommend(title, cosine_sim, movies_df):
     indices = pd.Series(movies_df.index, index=movies_df['title']).drop_duplicates()
     if title not in indices:
@@ -67,31 +57,57 @@ def content_based_recommend(title, cosine_sim, movies_df):
     return movies_df['title'].iloc[movie_indices].tolist()
 
 # -------------------------- Hybrid Filtering --------------------------
-# NOTE: Shape mismatch is possible; we handle it by trimming
-min_rows = min(reconstructed.shape[0], genre_sim.shape[0])
-min_cols = min(reconstructed.shape[1], genre_sim.shape[1])
-hybrid_matrix = 0.6 * reconstructed[:min_rows, :min_cols] + 0.4 * genre_sim[:min_rows, :min_cols]
-rmse_hybrid = np.sqrt(mean_squared_error(user_movie_matrix_scaled[:min_rows, :min_cols], hybrid_matrix))
+def hybrid_filtering(reconstructed, genre_sim, user_movie_matrix_scaled):
+    # NOTE: Shape mismatch is possible; we handle it by trimming
+    min_rows = min(reconstructed.shape[0], genre_sim.shape[0])
+    min_cols = min(reconstructed.shape[1], genre_sim.shape[1])
+    hybrid_matrix = 0.6 * reconstructed[:min_rows, :min_cols] + 0.4 * genre_sim[:min_rows, :min_cols]
+    rmse_hybrid = np.sqrt(mean_squared_error(user_movie_matrix_scaled[:min_rows, :min_cols], hybrid_matrix))
+    return rmse_hybrid, hybrid_matrix
 
 # -------------------------- Classification --------------------------
-movie_data = ratings.copy()
-movie_data['label'] = (movie_data['rating'] >= 3.5).astype(int)
-X = svd_matrix
-y = movie_data['label'].values[:X.shape[0]]
-X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, stratify=y, random_state=42)
+def classification_model(svd_matrix, ratings):
+    movie_data = ratings.copy()
+    movie_data['label'] = (movie_data['rating'] >= 3.5).astype(int)
+    X = svd_matrix
+    y = movie_data['label'].values[:X.shape[0]]
+    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, stratify=y, random_state=42)
 
-clf = LogisticRegression(max_iter=1000)
-clf.fit(X_train, y_train)
-y_pred = clf.predict(X_test)
+    clf = LogisticRegression(max_iter=1000)
+    clf.fit(X_train, y_train)
+    y_pred = clf.predict(X_test)
 
-cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
-cv_scores = cross_val_score(clf, X, y, cv=cv, scoring='accuracy')
+    cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
+    cv_scores = cross_val_score(clf, X, y, cv=cv, scoring='accuracy')
+
+    return clf, y_test, y_pred, cv_scores
 
 # -------------------------- Streamlit UI --------------------------
 st.title("🎥 Movie Recommendation System")
 
 menu = ["Content-Based", "Collaborative Filtering", "Hybrid", "Model Evaluation"]
 choice = st.sidebar.selectbox("Choose Recommendation Type", menu)
+
+# Load the datasets first
+movies, ratings, tags = load_data()
+
+# Now pass them to the preprocessing function
+ratings, user_movie_matrix, user_movie_matrix_scaled = preprocess_data(movies, ratings)
+
+# Perform SVD and Content-Based Calculations
+rmse_svd, svd_matrix, reconstructed = svd_decomposition(user_movie_matrix_scaled)
+
+# Content-Based Filtering
+movies['genres'] = movies['genres'].fillna('')
+vectorizer = TfidfVectorizer(stop_words='english')
+tfidf_matrix = vectorizer.fit_transform(movies['genres'])
+genre_sim = cosine_similarity(tfidf_matrix)
+
+# Hybrid Filtering
+rmse_hybrid, hybrid_matrix = hybrid_filtering(reconstructed, genre_sim, user_movie_matrix_scaled)
+
+# Model Classification
+clf, y_test, y_pred, cv_scores = classification_model(svd_matrix, ratings)
 
 if choice == "Content-Based":
     st.subheader("🔍 Content-Based Recommendation")
