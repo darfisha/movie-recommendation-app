@@ -17,7 +17,7 @@ st.set_page_config(page_title="🎬 Movie Recommender", layout="centered")
 def load_data():
     movies = pd.read_csv("movies.csv", encoding='latin-1')
     ratings = pd.read_csv("ratings.csv", encoding='latin-1')
-    return movies, ratings  # Removed tags.csv
+    return movies, ratings
 
 # -------------------------- Preprocessing --------------------------
 def preprocess_data(movies, ratings):
@@ -88,7 +88,7 @@ menu = ["Content-Based", "Collaborative Filtering", "Hybrid", "Model Evaluation"
 choice = st.sidebar.selectbox("Choose Recommendation Type", menu)
 
 # Load the datasets first
-movies, ratings = load_data()  # Adjusted to not load tags
+movies, ratings = load_data()
 
 # Now pass them to the preprocessing function
 ratings, user_movie_matrix, user_movie_matrix_scaled = preprocess_data(movies, ratings)
