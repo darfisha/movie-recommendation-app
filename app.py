@@ -9,6 +9,9 @@ from sklearn.linear_model import LogisticRegression
 from sklearn.model_selection import train_test_split, cross_val_score, StratifiedKFold
 from sklearn.metrics import mean_squared_error, accuracy_score, precision_score, recall_score, f1_score, confusion_matrix
 
+# ✅ SET PAGE CONFIG AT THE VERY TOP
+st.set_page_config(page_title="🎬 Movie Recommender", layout="centered")
+
 # -------------------------- Data Loading --------------------------
 @st.cache_data
 def load_data():
@@ -16,8 +19,6 @@ def load_data():
     ratings = pd.read_csv("ratings.csv", encoding='latin-1')
     tags = pd.read_csv("tags.csv", encoding='latin-1')
     return movies, ratings, tags
-
-movies, ratings, tags = load_data()
 
 # -------------------------- Preprocessing --------------------------
 def preprocess_data(movies, ratings):
