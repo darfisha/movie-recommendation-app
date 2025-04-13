@@ -20,6 +20,9 @@ def load_data():
     tags = pd.read_csv("tags.csv", encoding='latin-1')
     return movies, ratings, tags
 
+# Load the datasets
+movies, ratings, tags = load_data()
+
 # -------------------------- Preprocessing --------------------------
 def preprocess_data(movies, ratings):
     ratings = ratings.merge(movies, on='movieId', how='left')
@@ -122,4 +125,3 @@ elif choice == "Model Evaluation":
 
 st.markdown("---")
 st.caption("Built with ❤️ using Streamlit")
-
