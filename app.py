@@ -20,8 +20,14 @@ def load_data():
     tags = pd.read_csv("tags.csv", encoding='latin-1')
     return movies, ratings, tags
 
-# Load the datasets
-movies, ratings, tags = load_data()
+# Load the datasets first
+movies = pd.read_csv("movies.csv", encoding='latin-1')
+ratings = pd.read_csv("ratings.csv", encoding='latin-1')
+tags = pd.read_csv("tags.csv", encoding='latin-1')  # optional, depending on use
+
+# Now pass them to the preprocessing function
+ratings, user_movie_matrix, user_movie_matrix_scaled = preprocess_data(movies, ratings)
+
 
 # -------------------------- Preprocessing --------------------------
 def preprocess_data(movies, ratings):
@@ -86,7 +92,6 @@ cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
 cv_scores = cross_val_score(clf, X, y, cv=cv, scoring='accuracy')
 
 # -------------------------- Streamlit UI --------------------------
-st.set_page_config(page_title="🎬 Movie Recommender", layout="centered")
 st.title("🎥 Movie Recommendation System")
 
 menu = ["Content-Based", "Collaborative Filtering", "Hybrid", "Model Evaluation"]
